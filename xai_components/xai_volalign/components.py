@@ -65,6 +65,40 @@ class CreateBDVXML(Component):
             raise
 
 
+@xai_component(color="magenta")
+class StitchTiles(Component):
+    """
+    Component wrapper for VolAlign.stitch_tiles.
+
+    Executes a tile stitching pipeline by generating an ImageJ macro and running Fiji in headless mode.
+    This component constructs an ImageJ macro that:
+      1. Calculates pairwise shifts using phase correlation.
+      2. Filters pairwise shifts based on specified criteria.
+      3. Optimizes the global alignment and applies the calculated shifts.
+    The macro is written to a temporary file and executed by Fiji in headless mode.
+
+    ##### inPorts:
+    - xml_file_path (str, compulsory): Path to the BDV/XML file that contains the tile configuration.
+    - fiji_path (str, compulsory): Full path to the Fiji executable.
+
+    ##### outPorts:
+    - None.
+    """
+    
+    xml_file_path: InCompArg[str]
+    fiji_path: InCompArg[str]
+    
+    def execute(self, ctx) -> None:
+        xml_file_path = self.xml_file_path.value
+        fiji_path = self.fiji_path.value
+        
+        try:
+            stitch_tiles(xml_file_path, fiji_path)
+            print(f"Tile stitching executed successfully using XML: {xml_file_path} and Fiji: {fiji_path}")
+        except Exception as e:
+            print(f"Error during tile stitching: {e}")
+            raise
+
 @xai_component(color="green")
 class BlendTiles(Component):
     """
