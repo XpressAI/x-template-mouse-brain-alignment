@@ -1,1 +1,2 @@
 xircuits
+git+https://github.com/XpressAI/VolAlign.git#egg=VolAlign
