@@ -324,6 +324,12 @@
             ],
             "requirements": [],
             "default_example_path": "UtilsZipDirectory.xircuits"
+        },
+        {
+            "name": "xai_volalign",
+            "library_id": "VOLALIGN",
+            "local_path": "xai_components/xai_volalign",
+            "status": "installed"
         }
     ]
 }
