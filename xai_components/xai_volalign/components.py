@@ -19,16 +19,15 @@ class CreateBDVXML(Component):
     ##### inPorts:
     - output_h5_file (str, compulsory): Path to the output .h5 file where the BDV/XML file and associated tile data will be saved.
     - fov_list (list, compulsory): List of file paths to the FOV TIFF images.
-    - offset_list (list of lists, compulsory): List of lists containing offsets [column, row, z] for each FOV. 
+    - offset_list (list of lists, compulsory): List of lists containing offsets [column, row, z] for each FOV.
       This list is converted to a numpy array internally.
     - nchannels (int): Number of channels in each FOV image. Default is 1.
     - overlap_percentage (float): Overlap percentage between the tiles. Default is 0.05.
 
     ##### outPorts:
-    - None.
+    - xml_path (str): The path to the created BDV XML file.
     """
     
-    # Compulsory input ports
     output_h5_file: InCompArg[str]
     fov_list: InCompArg[list]
     offset_list: InCompArg[list]
@@ -36,21 +35,18 @@ class CreateBDVXML(Component):
     nchannels: InArg[int]
     overlap_percentage: InArg[float]
 
-    xml_path :OutArg[str]
+    xml_path: OutArg[str]
     
     def execute(self, ctx) -> None:
-        # Retrieve values from compulsory ports.
         output_h5_file = self.output_h5_file.value
         fov_list = self.fov_list.value
         offset_array = np.array(self.offset_list.value)
         
-        # Retrieve optional values or fallback to defaults.
         nchannels = self.nchannels.value if self.nchannels.value is not None else 1
         overlap = self.overlap_percentage.value if self.overlap_percentage.value is not None else 0.05
         increment_scale = (1 - overlap) * 2048
 
         try:
-            # Call the VolAlign function with the provided parameters.
             xml_path = create_bdv_xml(
                     output_h5_file=output_h5_file,
                     fov_list=fov_list,
@@ -79,7 +75,7 @@ class StitchTiles(Component):
     The macro is written to a temporary file and executed by Fiji in headless mode.
 
     ##### inPorts:
-    - xml_file_path (str, compulsory): Path to the BDV/XML file that contains the tile configuration.
+    - xml_path (str, compulsory): Path to the BDV/XML file that contains the tile configuration.
     - fiji_path (str, compulsory): Full path to the Fiji executable.
 
     ##### outPorts:
@@ -100,16 +96,16 @@ class StitchTiles(Component):
             print(f"Error during tile stitching: {e}")
             raise
 
+
 @xai_component(color="green")
 class BlendTiles(Component):
     """
     Component wrapper for VolAlign.blend_tiles.
 
     Blends stitched tile images for each channel and saves a TIFF file for each channel.
-    
     This component performs the following steps:
-      1. Loads a tileset from a BDV/XML file (Updated by BigStitcher) using the provided voxel size.
-      2. Groups tiles into chunks of size 'num_of_tiles / num_of_channels'. Each group is assumed to correspond to one channel.
+      1. Loads a tileset from a BDV/XML file (updated by BigStitcher) using the provided voxel size.
+      2. Groups tiles into chunks of size 'num_of_tiles / num_of_channels', assuming each group corresponds to one channel.
       3. For each group, computes offsets (converted to pixel units by dividing by the voxel size)
          and collects the corresponding image tiles.
       4. Blends the collected tiles using `blend_ind` to generate a single volume per channel.
@@ -122,7 +118,7 @@ class BlendTiles(Component):
     - channels_names (list, compulsory): List of channel names (e.g., ['CH1', 'CH2']).
 
     ##### outPorts:
-    - None.
+    - output_files (list): List of paths to the blended TIFF files for each channel.
     """
     
     xml_file: InCompArg[str]
@@ -130,8 +126,7 @@ class BlendTiles(Component):
     voxel_size: InCompArg[list]
     channels_names: InCompArg[list]
 
-    output_files:OutArg[list]
-    
+    output_files: OutArg[list]
     
     def execute(self, ctx) -> None:
         xml_file = self.xml_file.value
@@ -167,6 +162,8 @@ class VoxelSpacingResample(Component):
          to adjust the image to the desired target spacing.
       6. Writes the resampled image to the specified output path.
 
+    **Note:** The provided spacing values are given in [z, y, x] order and are internally re-ordered to [x, y, z] before resampling.
+
     ##### inPorts:
     - input_file (str, compulsory): Path to the 3D .tif image file.
     - output_path (str, compulsory): Path where the resampled 3D .tif image will be saved.
@@ -174,15 +171,13 @@ class VoxelSpacingResample(Component):
     - target_spacing (list, compulsory): Desired target spacing in [z, y, x] order.
 
     ##### outPorts:
-    - None
+    - None.
     """
     
-    # Compulsory input ports
     input_file: InCompArg[str]
     output_path: InCompArg[str]
     original_spacing: InCompArg[list]
     target_spacing: InCompArg[list]
-    
     
     def execute(self, ctx) -> None:
         input_file = self.input_file.value
@@ -194,14 +189,15 @@ class VoxelSpacingResample(Component):
             resampled = voxel_spacing_resample(
                 input_file=input_file,
                 output_path=output_path,
-                original_spacing=[original_spacing[2],original_spacing[1],original_spacing[0]],
-                target_spacing=[target_spacing[2],target_spacing[1],target_spacing[0]]
+                original_spacing=[original_spacing[2], original_spacing[1], original_spacing[0]],
+                target_spacing=[target_spacing[2], target_spacing[1], target_spacing[0]]
             )
 
             print(f"Resampling completed. Resampled image saved to {output_path}")
         except Exception as e:
             print(f"Error during voxel spacing resampling: {e}")
             raise
+
 
 
 @xai_component(color="purple")
@@ -220,7 +216,7 @@ class ApplyManualAlignment(Component):
     ##### inPorts:
     - matrix_file_path (str, compulsory): Path to the text file containing a 3x4 transformation matrix.
     - fixed_volume_path (str, compulsory): Path to the fixed (reference) image volume in TIFF format.
-    - moving_slice_path (str, compulsory): Path to the moving image volume in TIFF format.
+    - moving_volume_path (str, compulsory): Path to the moving image volume in TIFF format.
     - resample_output_fixed_path (str, compulsory): Output path for writing the fixed image in TIFF format.
     - resample_output_moving_path (str, compulsory): Output path for writing the resampled moving image in TIFF format.
 
@@ -267,18 +263,20 @@ class LinearAlignmentTuning(Component):
       1. Reads two 3D TIFF volumes (fixed and moving) from the provided file paths.
       2. Prints the shapes of the input volumes for verification.
       3. Uses a customizable set of alignment steps. If no steps are provided, a default configuration is used.
-      4. Calls the alignment_pipeline to compute the affine transformation matrix.
+      4. Calls the alignment pipeline to compute the affine transformation matrix.
       5. Saves the computed affine transformation matrix to a text file.
+
+    **Note:** The provided `fixed_spacing` and `moving_spacing` values (in [z, y, x] order) are scaled by the 
+    downsampling `factors` before alignment.
 
     ##### inPorts:
     - fixed_path (str, compulsory): File path to the fixed TIFF volume.
     - moving_path (str, compulsory): File path to the moving TIFF volume.
     - fixed_spacing (list, compulsory): Original spacing for the fixed volume in [z, y, x] order.
     - moving_spacing (list, compulsory): Original spacing for the moving volume in [z, y, x] order.
-    - steps (list): List of alignment steps. Each step is a tuple with the transformation type
-                                (e.g., 'affine') and a dictionary of parameters. If None, a default set of
-                                steps is used.
-    - factors (tuple ): Optional Downsampling factors for each axis if any default is (1,1,1).
+    - steps (list): List of alignment steps. Each step is a tuple with the transformation type (e.g., 'affine') 
+                    and a dictionary of parameters. If None, a default set of steps is used.
+    - factors (tuple): Optional downsampling factors for each axis. Defaults to (1, 1, 1) if not provided.
     - output_matrix_file (str, compulsory): File path where the computed affine transformation matrix will be saved.
 
     ##### outPorts:
@@ -301,7 +299,7 @@ class LinearAlignmentTuning(Component):
         fixed_spacing = self.fixed_spacing.value
         moving_spacing = self.moving_spacing.value
         output_matrix_file = self.output_matrix_file.value
-        factors = self.factors.value if self.factors.value is not None else (1,1,1)
+        factors = self.factors.value if self.factors.value is not None else (1, 1, 1)
         steps = self.steps.value if self.steps.value is not None else None
         
         try:
