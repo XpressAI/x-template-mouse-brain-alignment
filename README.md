@@ -1,4 +1,11 @@
 # Xircuits Mouse Brain Alignment Template
+
+![stitch_data](https://github.com/user-attachments/assets/1d62d7cc-3a4e-4e63-8506-96eea9e365b4)
+
+![process_data](https://github.com/user-attachments/assets/457144ff-1b75-4113-a697-c28a64c75075)
+
+
+
 ## Template Setup
 You will need Python 3.10+ to install Xircuits. We recommend installing within a conda virtual environment.
 
