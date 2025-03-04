@@ -1,17 +1,25 @@
 # Xircuits Mouse Brain Alignment Template
 ## Template Setup
-You will need Python 3.9+ to install Xircuits. We recommend installing within a virtual environment.
+You will need Python 3.10+ to install Xircuits. We recommend installing within a conda virtual environment.
 
 ## Libraries Setup
-Install the required libraries by running:
+After cloning the template, install the required libraries by running:
 ```
 $ pip install -r requirements.txt
 ```
 
 # Launch
-Launch Xircuits by executing:
+In a `srun` interactive session, activate your conda virtual environment, navigate to your template then Launch Xircuits by executing:
 ```
 $ xircuits --ip=0.0.0.0 --port=5520 --no-browser --NotebookApp.allow_origin='*' --NotebookApp.port_retries=0
+```
+In a different local terminal, Run: 
+```
+$ ssh -L 5520:nodexxxx:5520 <user_name>@eofe10.mit.edu  #replace the xxxx with the compute node and add your user name
+```
+Access Xircuits on your browser
+```
+http://localhost:5520/
 ```
 
 ### More detailed information on installation, setup, and features can be found on Xircuits.
