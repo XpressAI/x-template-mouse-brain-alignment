@@ -56,7 +56,6 @@ class CreateBDVXML(Component):
                 )
 
             self.xml_path.value = xml_path
-            print(f"BDV/XML file successfully created in {output_h5_file}")
         except Exception as e:
             print(f"Error during BDV/XML creation: {e}")
             raise
@@ -312,7 +311,6 @@ class LinearAlignmentTuning(Component):
                 steps=steps
             )
             self.affine_matrix.value = result
-            print(f"Affine transformation matrix computed and saved to {output_matrix_file}")
         except Exception as e:
             print(f"Error during linear alignment tuning: {e}")
             raise
@@ -372,7 +370,6 @@ class ConvertTiffToZarr(Component):
         zarr_file = self.zarr_file.value
         try:
             convert_tiff_to_zarr(tiff_file, zarr_file)
-            print(f"Converted TIFF file {tiff_file} to Zarr file {zarr_file}")
         except Exception as e:
             print(f"Error in convert_tiff_to_zarr: {e}")
             raise
@@ -408,7 +405,6 @@ class DownsampleTiff(Component):
         order = self.order.value if self.order.value is not None else 1
         try:
             downsample_tiff(input_path, output_path, factors, order)
-            print(f"Downsampled TIFF from {input_path} and saved to {output_path}")
         except Exception as e:
             print(f"Error in downsample_tiff: {e}")
             raise
@@ -440,7 +436,6 @@ class StackTiffImages(Component):
         output_file = self.output_file.value
         try:
             stack_tiff_images(file1, file2, output_file)
-            print(f"Stacked TIFF images from {file1} and {file2} and saved to {output_file}")
         except Exception as e:
             print(f"Error in stack_tiff_images: {e}")
             raise
@@ -478,7 +473,6 @@ class ReorientVolume(Component):
         try:
             result = reorient_volume_and_save_tiff(input_path, output_path, rotation, flip)
             self.reoriented_volume.value = result
-            print(f"Reoriented volume from {input_path} saved to {output_path}")
         except Exception as e:
             print(f"Error in reorient_volume_and_save_tiff: {e}")
             raise
