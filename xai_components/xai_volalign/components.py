@@ -4,6 +4,7 @@ import os
 import tifffile
 import numpy as np
 from VolAlign import *
+from VolAlign.pipeline_orchestrator import MicroscopyProcessingPipeline
 from exm.stitching.tileset import Tileset
 
 
@@ -321,25 +322,37 @@ class ConvertZarrToTiff(Component):
     """
     Component wrapper for VolAlign.convert_zarr_to_tiff.
 
-    Converts a Zarr-formatted file to a TIFF image file.
-    This component reads a dataset from a Zarr file, converts it to a NumPy array,
-    and writes the array to a TIFF file using the 'minisblack' photometric convention.
+    Convert Zarr volumes to TIFF format with optional chunked processing for large volumes.
+    For small volumes (chunk_size=None), loads entire volume into memory for fast conversion.
+    For large volumes, processes in chunks to avoid memory issues.
 
     ##### inPorts:
     - zarr_file (str, compulsory): Path to the input Zarr file.
     - tiff_file (str, compulsory): Path to the output TIFF file.
+    - chunk_size (int): Number of Z-slices to process at once. If None, loads entire volume (faster for small volumes).
+    - photometric (str): TIFF photometric interpretation. Default is 'minisblack'.
 
     ##### outPorts:
     - None.
     """
     zarr_file: InCompArg[str]
     tiff_file: InCompArg[str]
+    chunk_size: InArg[int]
+    photometric: InArg[str]
 
     def execute(self, ctx) -> None:
         zarr_file = self.zarr_file.value
         tiff_file = self.tiff_file.value
+        chunk_size = self.chunk_size.value if self.chunk_size.value is not None else None
+        photometric = self.photometric.value if self.photometric.value is not None else 'minisblack'
+        
         try:
-            convert_zarr_to_tiff(zarr_file, tiff_file)
+            convert_zarr_to_tiff(
+                zarr_path=zarr_file,
+                tiff_path=tiff_file,
+                chunk_size=chunk_size,
+                photometric=photometric
+            )
             print(f"Converted Zarr file {zarr_file} to TIFF file {tiff_file}")
         except Exception as e:
             print(f"Error in convert_zarr_to_tiff: {e}")
@@ -475,4 +488,627 @@ class ReorientVolume(Component):
             self.reoriented_volume.value = result
         except Exception as e:
             print(f"Error in reorient_volume_and_save_tiff: {e}")
+            raise
+
+
+# =============================================================================
+# NEW ENHANCED VOLALIGN COMPONENTS
+# =============================================================================
+
+
+@xai_component(color="lightblue")
+class DownsampleZarrVolume(Component):
+    """
+    Component wrapper for VolAlign.downsample_zarr_volume.
+
+    Memory-efficient downsampling of Zarr volumes with chunked processing.
+    Processes the volume in chunks to avoid loading the entire dataset into memory,
+    making it suitable for very large microscopy volumes.
+
+    ##### inPorts:
+    - input_zarr_path (str, compulsory): Path to input Zarr volume.
+    - output_zarr_path (str, compulsory): Path for output downsampled Zarr volume.
+    - downsample_factors (tuple, compulsory): Downsampling factors for (z, y, x).
+    - chunk_size (int): Number of Z-slices to process at once. Default is 50.
+    - compression (str): Compression algorithm ('zstd', 'lz4', 'blosc'). Default is 'zstd'.
+    - compression_level (int): Compression level (1-9). Default is 3.
+
+    ##### outPorts:
+    - None.
+    """
+    
+    input_zarr_path: InCompArg[str]
+    output_zarr_path: InCompArg[str]
+    downsample_factors: InCompArg[tuple]
+    chunk_size: InArg[int]
+    compression: InArg[str]
+    compression_level: InArg[int]
+    
+    def execute(self, ctx) -> None:
+        input_zarr_path = self.input_zarr_path.value
+        output_zarr_path = self.output_zarr_path.value
+        downsample_factors = self.downsample_factors.value
+        chunk_size = self.chunk_size.value if self.chunk_size.value is not None else 50
+        compression = self.compression.value if self.compression.value is not None else 'zstd'
+        compression_level = self.compression_level.value if self.compression_level.value is not None else 3
+        
+        try:
+            downsample_zarr_volume(
+                input_zarr_path=input_zarr_path,
+                output_zarr_path=output_zarr_path,
+                downsample_factors=downsample_factors,
+                chunk_size=chunk_size,
+                compression=compression,
+                compression_level=compression_level
+            )
+            print(f"Zarr volume downsampling completed: {output_zarr_path}")
+        except Exception as e:
+            print(f"Error during Zarr volume downsampling: {e}")
+            raise
+
+
+@xai_component(color="lightgreen")
+class UpsampleSegmentationLabels(Component):
+    """
+    Component wrapper for VolAlign.upsample_segmentation_labels.
+
+    Upsample segmentation label volumes while preserving integer label values.
+    Uses nearest-neighbor interpolation (order=0) to maintain discrete integer
+    labels during upsampling, essential for segmentation masks.
+
+    ##### inPorts:
+    - input_zarr_path (str, compulsory): Path to input segmentation Zarr volume.
+    - output_zarr_path (str, compulsory): Path for upsampled output Zarr volume.
+    - upsample_factors (tuple, compulsory): Upsampling factors for (z, y, x).
+    - chunk_size (int): Number of Z-slices to process at once. Default is 50.
+    - compression (str): Compression algorithm for output. Default is 'zstd'.
+    - target_shape (tuple): Override output shape (z, y, x). If provided, takes precedence over calculated shape.
+
+    ##### outPorts:
+    - None.
+    """
+    
+    input_zarr_path: InCompArg[str]
+    output_zarr_path: InCompArg[str]
+    upsample_factors: InCompArg[tuple]
+    chunk_size: InArg[int]
+    compression: InArg[str]
+    target_shape: InArg[tuple]
+    
+    def execute(self, ctx) -> None:
+        input_zarr_path = self.input_zarr_path.value
+        output_zarr_path = self.output_zarr_path.value
+        upsample_factors = self.upsample_factors.value
+        chunk_size = self.chunk_size.value if self.chunk_size.value is not None else 50
+        compression = self.compression.value if self.compression.value is not None else 'zstd'
+        target_shape = self.target_shape.value if self.target_shape.value is not None else None
+        
+        try:
+            upsample_segmentation_labels(
+                input_zarr_path=input_zarr_path,
+                output_zarr_path=output_zarr_path,
+                upsample_factors=upsample_factors,
+                chunk_size=chunk_size,
+                compression=compression,
+                target_shape=target_shape
+            )
+            print(f"Segmentation label upsampling completed: {output_zarr_path}")
+        except Exception as e:
+            print(f"Error during segmentation label upsampling: {e}")
+            raise
+
+
+@xai_component(color="coral")
+class MergeZarrChannels(Component):
+    """
+    Component wrapper for VolAlign.merge_zarr_channels.
+
+    Memory-efficient merging of two Zarr volumes representing different imaging channels.
+    Supports different merging strategies for combining channels (e.g., 405nm and 488nm)
+    commonly used in microscopy registration workflows.
+
+    ##### inPorts:
+    - channel_a_path (str, compulsory): Path to first channel Zarr volume.
+    - channel_b_path (str, compulsory): Path to second channel Zarr volume.
+    - output_path (str, compulsory): Path for merged output Zarr volume.
+    - merge_strategy (str): Merging method - "mean", "max", or "stack". Default is "mean".
+    - block_depth (int): Number of Z-slices to process per block. Default is 50.
+    - compression (str): Compression algorithm for output. Default is 'zstd'.
+
+    ##### outPorts:
+    - None.
+    """
+    
+    channel_a_path: InCompArg[str]
+    channel_b_path: InCompArg[str]
+    output_path: InCompArg[str]
+    merge_strategy: InArg[str]
+    block_depth: InArg[int]
+    compression: InArg[str]
+    
+    def execute(self, ctx) -> None:
+        channel_a_path = self.channel_a_path.value
+        channel_b_path = self.channel_b_path.value
+        output_path = self.output_path.value
+        merge_strategy = self.merge_strategy.value if self.merge_strategy.value is not None else "mean"
+        block_depth = self.block_depth.value if self.block_depth.value is not None else 50
+        compression = self.compression.value if self.compression.value is not None else 'zstd'
+        
+        try:
+            merge_zarr_channels(
+                channel_a_path=channel_a_path,
+                channel_b_path=channel_b_path,
+                output_path=output_path,
+                merge_strategy=merge_strategy,
+                block_depth=block_depth,
+                compression=compression
+            )
+            print(f"Zarr channel merging completed: {output_path}")
+        except Exception as e:
+            print(f"Error during Zarr channel merging: {e}")
+            raise
+
+
+@xai_component(color="gold")
+class ScaleIntensityToUint16(Component):
+    """
+    Component wrapper for VolAlign.scale_intensity_to_uint16.
+
+    Scale intensity values in a Zarr volume to uint16 range [0, 65535].
+    Useful for normalizing microscopy data before processing or visualization.
+
+    ##### inPorts:
+    - input_zarr_path (str, compulsory): Path to input Zarr volume.
+    - output_zarr_path (str, compulsory): Path for scaled output Zarr volume.
+    - intensity_range (tuple): Min/max values for scaling. If None, uses global min/max.
+    - chunk_size (int): Number of Z-slices to process at once. Default is 50.
+
+    ##### outPorts:
+    - None.
+    """
+    
+    input_zarr_path: InCompArg[str]
+    output_zarr_path: InCompArg[str]
+    intensity_range: InArg[tuple]
+    chunk_size: InArg[int]
+    
+    def execute(self, ctx) -> None:
+        input_zarr_path = self.input_zarr_path.value
+        output_zarr_path = self.output_zarr_path.value
+        intensity_range = self.intensity_range.value if self.intensity_range.value is not None else None
+        chunk_size = self.chunk_size.value if self.chunk_size.value is not None else 50
+        
+        try:
+            scale_intensity_to_uint16(
+                input_zarr_path=input_zarr_path,
+                output_zarr_path=output_zarr_path,
+                intensity_range=intensity_range,
+                chunk_size=chunk_size
+            )
+            print(f"Intensity scaling completed: {output_zarr_path}")
+        except Exception as e:
+            print(f"Error during intensity scaling: {e}")
+            raise
+
+
+@xai_component(color="darkblue")
+class ComputeAffineRegistration(Component):
+    """
+    Component wrapper for VolAlign.compute_affine_registration.
+
+    Compute initial affine registration between two microscopy volumes.
+    Performs coarse alignment on downsampled volumes using feature-based registration
+    followed by gradient descent optimization. This replaces the "initial" alignment step.
+
+    ##### inPorts:
+    - fixed_volume_path (str, compulsory): Path to reference volume (TIFF or Zarr).
+    - moving_volume_path (str, compulsory): Path to volume to be aligned (TIFF or Zarr).
+    - voxel_spacing (list, compulsory): Voxel spacing in [z, y, x] order (microns).
+    - output_matrix_path (str, compulsory): Path to save the computed affine transformation matrix.
+    - downsample_factors (tuple): Downsampling factors for (z, y, x). Default is (4, 7, 7).
+    - alignment_steps (list): Custom alignment pipeline steps. If None, uses default.
+
+    ##### outPorts:
+    - affine_matrix (np.ndarray): The computed 4x4 affine transformation matrix.
+    """
+    
+    fixed_volume_path: InCompArg[str]
+    moving_volume_path: InCompArg[str]
+    voxel_spacing: InCompArg[list]
+    output_matrix_path: InCompArg[str]
+    downsample_factors: InArg[tuple]
+    alignment_steps: InArg[list]
+    
+    affine_matrix: OutArg[object]
+    
+    def execute(self, ctx) -> None:
+        fixed_volume_path = self.fixed_volume_path.value
+        moving_volume_path = self.moving_volume_path.value
+        voxel_spacing = self.voxel_spacing.value
+        output_matrix_path = self.output_matrix_path.value
+        downsample_factors = self.downsample_factors.value if self.downsample_factors.value is not None else (4, 7, 7)
+        alignment_steps = self.alignment_steps.value if self.alignment_steps.value is not None else None
+        
+        try:
+            affine_matrix = compute_affine_registration(
+                fixed_volume_path=fixed_volume_path,
+                moving_volume_path=moving_volume_path,
+                voxel_spacing=voxel_spacing,
+                output_matrix_path=output_matrix_path,
+                downsample_factors=downsample_factors,
+                alignment_steps=alignment_steps
+            )
+            self.affine_matrix.value = affine_matrix
+            print(f"Affine registration completed: {output_matrix_path}")
+        except Exception as e:
+            print(f"Error during affine registration: {e}")
+            raise
+
+
+@xai_component(color="darkgreen")
+class ComputeDeformationFieldRegistration(Component):
+    """
+    Component wrapper for VolAlign.compute_deformation_field_registration.
+
+    Compute dense deformation field registration for precise alignment.
+    Applies initial affine transformation then computes a dense deformation field
+    for fine-grained alignment. This replaces the "final" alignment step.
+
+    ##### inPorts:
+    - fixed_zarr_path (str, compulsory): Path to reference Zarr volume.
+    - moving_zarr_path (str, compulsory): Path to moving Zarr volume.
+    - affine_matrix_path (str, compulsory): Path to initial affine transformation matrix.
+    - output_directory (str, compulsory): Directory to save alignment results.
+    - output_name (str, compulsory): Base name for output files.
+    - voxel_spacing (list, compulsory): Voxel spacing in [z, y, x] order (microns).
+    - block_size (list): Block size for distributed processing. Default is [512, 512, 512].
+    - cluster_config (dict): Dask cluster configuration. If None, uses default.
+
+    ##### outPorts:
+    - final_aligned_path (str): Path to the final aligned volume.
+    """
+    
+    fixed_zarr_path: InCompArg[str]
+    moving_zarr_path: InCompArg[str]
+    affine_matrix_path: InCompArg[str]
+    output_directory: InCompArg[str]
+    output_name: InCompArg[str]
+    voxel_spacing: InCompArg[list]
+    block_size: InArg[list]
+    cluster_config: InArg[dict]
+    
+    final_aligned_path: OutArg[str]
+    
+    def execute(self, ctx) -> None:
+        fixed_zarr_path = self.fixed_zarr_path.value
+        moving_zarr_path = self.moving_zarr_path.value
+        affine_matrix_path = self.affine_matrix_path.value
+        output_directory = self.output_directory.value
+        output_name = self.output_name.value
+        voxel_spacing = self.voxel_spacing.value
+        block_size = self.block_size.value if self.block_size.value is not None else [512, 512, 512]
+        cluster_config = self.cluster_config.value if self.cluster_config.value is not None else None
+        
+        try:
+            final_aligned_path = compute_deformation_field_registration(
+                fixed_zarr_path=fixed_zarr_path,
+                moving_zarr_path=moving_zarr_path,
+                affine_matrix_path=affine_matrix_path,
+                output_directory=output_directory,
+                output_name=output_name,
+                voxel_spacing=voxel_spacing,
+                block_size=block_size,
+                cluster_config=cluster_config
+            )
+            self.final_aligned_path.value = final_aligned_path
+            print(f"Deformation field registration completed: {final_aligned_path}")
+        except Exception as e:
+            print(f"Error during deformation field registration: {e}")
+            raise
+
+
+@xai_component(color="red")
+class DistributedNucleiSegmentation(Component):
+    """
+    Component wrapper for VolAlign.distributed_nuclei_segmentation.
+
+    Perform distributed nuclei segmentation on large microscopy volumes.
+    Uses Cellpose with distributed processing to segment nuclei in 3D volumes,
+    typically applied to the 405nm channel for nuclear segmentation.
+
+    ##### inPorts:
+    - input_zarr_path (str, compulsory): Path to input Zarr volume (typically 405nm channel).
+    - output_zarr_path (str, compulsory): Path for output segmentation masks.
+    - model_type (str): Cellpose model type ('cpsam', 'nuclei', etc.). Default is 'cpsam'.
+    - block_size (tuple): Processing block size (z, y, x). Default is (500, 1024, 1024).
+    - preprocessing_sigma (float): Gaussian smoothing sigma for preprocessing. Default is 2.0.
+    - cluster_config (dict): Dask cluster configuration. If None, uses default.
+    - temporary_directory (str): Directory for temporary files. If None, uses output directory.
+
+    ##### outPorts:
+    - segments (object): Segmentation results.
+    - bounding_boxes (list): List of bounding boxes for detected objects.
+    - num_objects (int): Number of detected objects.
+    """
+    
+    input_zarr_path: InCompArg[str]
+    output_zarr_path: InCompArg[str]
+    model_type: InArg[str]
+    block_size: InArg[tuple]
+    preprocessing_sigma: InArg[float]
+    cluster_config: InArg[dict]
+    temporary_directory: InArg[str]
+    
+    segments: OutArg[object]
+    bounding_boxes: OutArg[list]
+    num_objects: OutArg[int]
+    
+    def execute(self, ctx) -> None:
+        input_zarr_path = self.input_zarr_path.value
+        output_zarr_path = self.output_zarr_path.value
+        model_type = self.model_type.value if self.model_type.value is not None else 'cpsam'
+        block_size = self.block_size.value if self.block_size.value is not None else (500, 1024, 1024)
+        preprocessing_sigma = self.preprocessing_sigma.value if self.preprocessing_sigma.value is not None else 2.0
+        cluster_config = self.cluster_config.value if self.cluster_config.value is not None else None
+        temporary_directory = self.temporary_directory.value if self.temporary_directory.value is not None else None
+        
+        try:
+            segments, bounding_boxes = distributed_nuclei_segmentation(
+                input_zarr_path=input_zarr_path,
+                output_zarr_path=output_zarr_path,
+                model_type=model_type,
+                block_size=block_size,
+                preprocessing_sigma=preprocessing_sigma,
+                cluster_config=cluster_config,
+                temporary_directory=temporary_directory
+            )
+            self.segments.value = segments
+            self.bounding_boxes.value = bounding_boxes
+            self.num_objects.value = len(bounding_boxes)
+            print(f"Distributed nuclei segmentation completed: {output_zarr_path}")
+            print(f"Number of detected objects: {len(bounding_boxes)}")
+        except Exception as e:
+            print(f"Error during distributed nuclei segmentation: {e}")
+            raise
+
+
+@xai_component(color="darkmagenta")
+class ApplyDeformationToChannels(Component):
+    """
+    Component wrapper for VolAlign.apply_deformation_to_channels.
+
+    Apply computed deformation field to multiple imaging channels.
+    Uses the deformation field computed from registration channels (405nm, 488nm)
+    to align all other imaging channels (epitope markers) for consistent multi-round analysis.
+
+    ##### inPorts:
+    - reference_zarr_path (str, compulsory): Path to reference volume (fixed).
+    - channel_zarr_paths (list, compulsory): Paths to channel volumes to be transformed.
+    - deformation_field_path (str, compulsory): Path to computed deformation field.
+    - output_directory (str, compulsory): Directory for aligned channel outputs.
+    - voxel_spacing (list, compulsory): Voxel spacing in [z, y, x] order.
+    - block_size (list): Block size for distributed processing. Default is [512, 512, 512].
+    - cluster_config (dict): Dask cluster configuration. If None, uses default.
+
+    ##### outPorts:
+    - aligned_channel_paths (list): Paths to aligned channel volumes.
+    """
+    
+    reference_zarr_path: InCompArg[str]
+    channel_zarr_paths: InCompArg[list]
+    deformation_field_path: InCompArg[str]
+    output_directory: InCompArg[str]
+    voxel_spacing: InCompArg[list]
+    block_size: InArg[list]
+    cluster_config: InArg[dict]
+    
+    aligned_channel_paths: OutArg[list]
+    
+    def execute(self, ctx) -> None:
+        reference_zarr_path = self.reference_zarr_path.value
+        channel_zarr_paths = self.channel_zarr_paths.value
+        deformation_field_path = self.deformation_field_path.value
+        output_directory = self.output_directory.value
+        voxel_spacing = self.voxel_spacing.value
+        block_size = self.block_size.value if self.block_size.value is not None else [512, 512, 512]
+        cluster_config = self.cluster_config.value if self.cluster_config.value is not None else None
+        
+        try:
+            aligned_paths = apply_deformation_to_channels(
+                reference_zarr_path=reference_zarr_path,
+                channel_zarr_paths=channel_zarr_paths,
+                deformation_field_path=deformation_field_path,
+                output_directory=output_directory,
+                voxel_spacing=voxel_spacing,
+                block_size=block_size,
+                cluster_config=cluster_config
+            )
+            self.aligned_channel_paths.value = aligned_paths
+            print(f"Deformation applied to {len(aligned_paths)} channels")
+        except Exception as e:
+            print(f"Error during deformation application to channels: {e}")
+            raise
+
+
+@xai_component(color="darkcyan")
+class CreateRegistrationSummary(Component):
+    """
+    Component wrapper for VolAlign.create_registration_summary.
+
+    Create a comprehensive summary of the registration process.
+    Generates metadata and quality metrics for the registration workflow,
+    useful for tracking and validating alignment results.
+
+    ##### inPorts:
+    - fixed_path (str, compulsory): Path to reference volume.
+    - moving_path (str, compulsory): Path to moving volume.
+    - affine_matrix_path (str, compulsory): Path to affine transformation matrix.
+    - deformation_field_path (str, compulsory): Path to deformation field.
+    - final_aligned_path (str, compulsory): Path to final aligned volume.
+    - output_summary_path (str, compulsory): Path to save summary JSON.
+
+    ##### outPorts:
+    - summary (dict): Registration summary dictionary.
+    """
+    
+    fixed_path: InCompArg[str]
+    moving_path: InCompArg[str]
+    affine_matrix_path: InCompArg[str]
+    deformation_field_path: InCompArg[str]
+    final_aligned_path: InCompArg[str]
+    output_summary_path: InCompArg[str]
+    
+    summary: OutArg[dict]
+    
+    def execute(self, ctx) -> None:
+        fixed_path = self.fixed_path.value
+        moving_path = self.moving_path.value
+        affine_matrix_path = self.affine_matrix_path.value
+        deformation_field_path = self.deformation_field_path.value
+        final_aligned_path = self.final_aligned_path.value
+        output_summary_path = self.output_summary_path.value
+        
+        try:
+            summary = create_registration_summary(
+                fixed_path=fixed_path,
+                moving_path=moving_path,
+                affine_matrix_path=affine_matrix_path,
+                deformation_field_path=deformation_field_path,
+                final_aligned_path=final_aligned_path,
+                output_summary_path=output_summary_path
+            )
+            self.summary.value = summary
+            print(f"Registration summary created: {output_summary_path}")
+        except Exception as e:
+            print(f"Error during registration summary creation: {e}")
+            raise
+
+
+@xai_component(color="indigo")
+class MicroscopyProcessingPipelineComponent(Component):
+    """
+    Component wrapper for VolAlign.MicroscopyProcessingPipeline.
+
+    High-level orchestrator for multi-round microscopy processing workflows.
+    Manages the complete pipeline from raw data to aligned, segmented volumes
+    including registration, segmentation, and channel processing.
+
+    ##### inPorts:
+    - config (dict, compulsory): Pipeline configuration dictionary containing:
+        - working_directory: Base directory for processing
+        - voxel_spacing: Voxel spacing in [z, y, x] order (microns)
+        - downsample_factors: Downsampling factors for (z, y, x)
+        - block_size: Block size for distributed processing
+        - cluster_config: Dask cluster configuration
+    - operation (str, compulsory): Operation to perform:
+        - "prepare_round_data": Convert TIFF files to Zarr format
+        - "run_registration_workflow": Execute complete registration workflow
+        - "run_segmentation_workflow": Execute nuclei segmentation workflow
+        - "apply_registration_to_all_channels": Apply registration to all channels
+        - "save_pipeline_state": Save current pipeline state
+        - "generate_processing_report": Generate comprehensive report
+    - operation_params (dict, compulsory): Parameters specific to the chosen operation
+
+    ##### outPorts:
+    - pipeline (object): The MicroscopyProcessingPipeline instance.
+    - result (object): Result of the executed operation.
+    """
+    
+    config: InCompArg[dict]
+    operation: InCompArg[str]
+    operation_params: InCompArg[dict]
+    
+    pipeline: OutArg[object]
+    result: OutArg[object]
+    
+    def execute(self, ctx) -> None:
+        config = self.config.value
+        operation = self.operation.value
+        operation_params = self.operation_params.value
+        
+        try:
+            # Initialize or reuse pipeline
+            if not hasattr(self, '_pipeline') or self._pipeline is None:
+                self._pipeline = MicroscopyProcessingPipeline(config)
+            
+            pipeline = self._pipeline
+            result = None
+            
+            if operation == "prepare_round_data":
+                # Required params: round_name, tiff_files, output_zarr_dir (optional)
+                round_name = operation_params["round_name"]
+                tiff_files = operation_params["tiff_files"]
+                output_zarr_dir = operation_params.get("output_zarr_dir", None)
+                
+                result = pipeline.prepare_round_data(
+                    round_name=round_name,
+                    tiff_files=tiff_files,
+                    output_zarr_dir=output_zarr_dir
+                )
+                
+            elif operation == "run_registration_workflow":
+                # Required params: fixed_round_data, moving_round_data, registration_output_dir, registration_name
+                fixed_round_data = operation_params["fixed_round_data"]
+                moving_round_data = operation_params["moving_round_data"]
+                registration_output_dir = operation_params["registration_output_dir"]
+                registration_name = operation_params["registration_name"]
+                
+                result = pipeline.run_registration_workflow(
+                    fixed_round_data=fixed_round_data,
+                    moving_round_data=moving_round_data,
+                    registration_output_dir=registration_output_dir,
+                    registration_name=registration_name
+                )
+                
+            elif operation == "run_segmentation_workflow":
+                # Required params: input_405_channel, segmentation_output_dir, segmentation_name
+                # Optional params: downsample_for_segmentation, upsample_results
+                input_405_channel = operation_params["input_405_channel"]
+                segmentation_output_dir = operation_params["segmentation_output_dir"]
+                segmentation_name = operation_params["segmentation_name"]
+                downsample_for_segmentation = operation_params.get("downsample_for_segmentation", True)
+                upsample_results = operation_params.get("upsample_results", True)
+                
+                result = pipeline.run_segmentation_workflow(
+                    input_405_channel=input_405_channel,
+                    segmentation_output_dir=segmentation_output_dir,
+                    segmentation_name=segmentation_name,
+                    downsample_for_segmentation=downsample_for_segmentation,
+                    upsample_results=upsample_results
+                )
+                
+            elif operation == "apply_registration_to_all_channels":
+                # Required params: reference_round_data, target_round_data, deformation_field_path, output_directory
+                reference_round_data = operation_params["reference_round_data"]
+                target_round_data = operation_params["target_round_data"]
+                deformation_field_path = operation_params["deformation_field_path"]
+                output_directory = operation_params["output_directory"]
+                
+                result = pipeline.apply_registration_to_all_channels(
+                    reference_round_data=reference_round_data,
+                    target_round_data=target_round_data,
+                    deformation_field_path=deformation_field_path,
+                    output_directory=output_directory
+                )
+                
+            elif operation == "save_pipeline_state":
+                # Required params: output_path
+                output_path = operation_params["output_path"]
+                pipeline.save_pipeline_state(output_path)
+                result = f"Pipeline state saved to: {output_path}"
+                
+            elif operation == "generate_processing_report":
+                # Required params: output_path
+                output_path = operation_params["output_path"]
+                result = pipeline.generate_processing_report(output_path)
+                
+            else:
+                raise ValueError(f"Unknown operation: {operation}")
+            
+            self.pipeline.value = pipeline
+            self.result.value = result
+            print(f"Pipeline operation '{operation}' completed successfully")
+            
+        except Exception as e:
+            print(f"Error during pipeline operation '{operation}': {e}")
             raise
