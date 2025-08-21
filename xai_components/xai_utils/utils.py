@@ -1,3 +1,8 @@
+from concurrent.futures import ProcessPoolExecutor
+from multiprocessing import get_context
+
+import dill
+
 from xai_components.base import InArg, OutArg, InCompArg, Component, xai_component, secret, dynalist, dynatuple, BaseComponent, SubGraphExecutor
 
 import os
@@ -213,7 +218,6 @@ class ZipDirectory(Component):
         |-- file1
         |-- file2
         ```
-
     """
     zip_fn: InArg[str]
     dir_name: InCompArg[str]
@@ -221,7 +225,6 @@ class ZipDirectory(Component):
 
     def execute(self, ctx) -> None:
         from zipfile import ZipFile
-        from tqdm import tqdm
 
         zip_fn = self.zip_fn.value if self.zip_fn.value else Path(sys.argv[0]).stem
         dir_name = self.dir_name.value
@@ -232,14 +235,14 @@ class ZipDirectory(Component):
             zip_fn = zip_fn + ".zip"
 
         if not Path(zip_fn).is_file():
-            print(zip_fn + " created at " + os.getcwd()) 
+            print(zip_fn + " created at " + os.getcwd())
             zipObj = ZipFile(zip_fn, 'w')
         else:
-            print(zip_fn + " updated at " + os.getcwd()) 
-            zipObj = ZipFile(zip_fn,'a')
+            print(zip_fn + " updated at " + os.getcwd())
+            zipObj = ZipFile(zip_fn, 'a')
 
-        for root, dirs, files in tqdm(list(os.walk(dir_name))):
-            # chop off root dir
+        for root, dirs, files in list(os.walk(dir_name)):
+            # chop off root dir if include_dir is False
             if self.include_dir.value == False:
                 length = len(dir_name)
                 dirs = root[length:]
@@ -729,6 +732,54 @@ class RunParallelThread(Component):
 
         self.futures.value.append(x)
 
+
+def run_body_serialized(payload):
+    """
+    Unpickles and runs a body (subgraph) with its context.
+
+    Parameters:
+        payload (bytes): Pickled tuple of (body, ctx)
+    """
+    body, ctx = dill.loads(payload)
+    SubGraphExecutor(body).do(ctx)
+
+
+@xai_component(color='blue')
+class RunParallelProcess(Component):
+    """
+    Executes a given body in separate processes using multiprocessing and dill.
+
+    ##### inPorts:
+    - n_workers (int): Number of worker processes to use for executing the body in parallel.
+
+    ##### outPorts:
+    - futures (list): Futures representing parallel executions.
+
+    ##### Branches:
+    - body: The body (subgraph) to be run in each process.
+    """
+    n_workers: InArg[int]
+    futures: OutArg[list]
+    body: BaseComponent
+
+    def __init__(self):
+        super().__init__()
+        self.futures.value = []
+
+    def execute(self, ctx) -> None:
+        from copy import deepcopy
+
+        ctx_mp = get_context("spawn")
+        executor = ProcessPoolExecutor(max_workers=self.n_workers.value, mp_context=ctx_mp)
+
+        # Serialize the work
+        payload = dill.dumps((deepcopy(self.body), deepcopy(ctx)))
+        future = executor.submit(run_body_serialized, payload)
+        future.add_done_callback(lambda x: x.result())
+
+        self.futures.value.append(future)
+
+
 @xai_component(color='blue')
 class AwaitFutures(Component):
     """Waits for a list of futures to complete.
@@ -869,3 +920,120 @@ class RegexSplit(Component):
 
     def execute(self, ctx) -> None:
         self.split_result.value = re.split(self.regex_pattern.value, self.input_string.value)
+
+
+@xai_component
+class ToString(Component):
+    """Converts an input object to its string representation.
+
+    ##### inPorts:
+    - obj (any): The input object to convert to a string.
+
+    ##### outPorts:
+    - string (str): The resulting string representation of the input object.
+    """
+    obj: InCompArg[any]
+    string: OutArg[str]
+
+    def execute(self, ctx) -> None:
+        self.string.value = str(self.obj.value)
+
+
+@xai_component
+class StringWordCharacterCount(Component):
+    """Component to count the number of words and characters in a given text.
+
+    ##### inPorts:
+    - text (str): The input text to analyze.
+    
+    ##### outPorts:
+    - word_count (int): The count of words in the input text.
+    - character_count (int): The count of characters in the input text.
+    """
+    text: InArg[str]
+    word_count: OutArg[int]
+    character_count: OutArg[int]
+
+    def execute(self, ctx) -> None:
+        # Get the input text
+        input_text = self.text.value
+        
+        # Count words and characters
+        self.word_count.value = len(input_text.split())
+        self.character_count.value = len(input_text)
+
+@xai_component
+class StringStartsWith(Component):
+    """Component to check if a given string starts with a specified prefix.
+
+    ##### inPorts:
+    - string (str): The input string to check.
+    - prefix (str): The prefix to check against the input string.
+    
+    ##### outPorts:
+    - starts_with (bool): True if the input string starts with the specified prefix, otherwise False.
+    """
+    string: InCompArg[str]
+    prefix: InCompArg[str]
+    
+    starts_with: OutArg[bool]
+    
+    def execute(self, ctx) -> None:
+        self.starts_with.value = self.string.value.startswith(self.prefix.value)
+
+@xai_component
+class StringEndsWith(Component):
+    """Component to check if a given string ends with a specified postfix.
+
+    ##### inPorts:
+    - string (str): The input string to check.
+    - postfix (str): The postfix to check against the input string.
+    
+    ##### outPorts:
+    - ends_with (bool): True if the input string ends with the specified postfix, otherwise False.
+    """
+    string: InCompArg[str]
+    postfix: InCompArg[str]
+    
+    ends_with: OutArg[bool]
+    
+    def execute(self, ctx) -> None:
+        self.ends_with.value = self.string.value.endswith(self.postfix.value)
+
+@xai_component
+class StringGetLength(Component):
+    """Component to get the length of a given string.
+
+    ##### inPorts:
+    - string (str): The input string whose length is to be determined.
+    
+    ##### outPorts:
+    - length (int): The length of the input string.
+    """
+    string: InCompArg[str]
+    
+    length: OutArg[int]
+    
+    def execute(self, ctx) -> None:
+        self.length.value = len(self.string.value)
+
+@xai_component
+class StringLimitToLength(Component):
+    """Component to limit a given string to a specified maximum length.
+
+    ##### inPorts:
+    - string (str): The input string to be limited.
+    - max_length (int): The maximum length to limit the input string to.
+    
+    ##### outPorts:
+    - out_string (str): The resulting string limited to the specified maximum length.
+    """
+    string: InCompArg[str]
+    max_length: InCompArg[int]
+    
+    out_string: OutArg[str]
+    
+    def execute(self, ctx) -> None:
+        new_length = min(len(self.string.value), self.max_length.value)
+        
+        self.out_string.value = self.string.value[:new_length]
